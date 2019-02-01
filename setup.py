@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-with open('icosphere/__init__.py') as f:
+with open('icosphere_py/__init__.py') as f:
     for line in f:
         if line.find("__version__") >= 0:
             version = line.split("=")[1].strip()

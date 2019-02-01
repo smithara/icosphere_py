@@ -24,6 +24,31 @@ https://www.mathworks.com/matlabcentral/fileexchange/50105-icosphere
 
 import numpy as np
 import pandas as pd
+from scipy.spatial import cKDTree as KDTree
+
+
+def sph2cart(R, t, p):
+    # R,t,p are Radius, theta (colatitude), phi (longitude)
+        # 0<t<180, 0<p<360
+    # Calculate the sines and cosines
+    rad = np.pi/180
+    s_p = np.sin(p*rad)
+    s_t = np.sin(t*rad)
+    c_p = np.cos(p*rad)
+    c_t = np.cos(t*rad)
+    # Calculate the x,y,z over the whole grid
+    X = R*c_p*s_t
+    Y = R*s_p*s_t
+    Z = R*c_t
+    return X, Y, Z
+
+
+def cart2sph(X, Y, Z):
+    rad = np.pi/180
+    theta = 90 - np.arctan2(Z, np.sqrt(X**2 + Y**2))/rad
+    phi = np.mod(np.arctan2(Y, X)/rad, 360)
+    R = np.sqrt(X**2 + Y**2 + Z**2)
+    return R, theta, phi
 
 
 def get_nearest_neighbours(p, N, i):
@@ -59,44 +84,72 @@ def matchxyz(xyz0, xyz1, xyz0arr, xyz1arr):
 
 
 def get_edgevecs(vertices):
-    """Given a set of vertices,
-    return the set of vectors between vertices which define the edges
+    """Given a set of vertices, find the neighbouring 5 or 6 vertices to each,
+    return the set of vectors between vertices (which define the edges)
     """
-    edgevecs = []
-    for i in range(vertices.shape[0]):
-        # Coordinates of point i
-        x0, y0, z0 = vertices.loc[i].x, vertices.loc[i].y, vertices.loc[i].z
-        p = get_nearest_neighbours(vertices, 6, i)
-#         print(vertices.loc[i].origicos)
-        if vertices.loc[i].origicos:
-            Nnearestneighbours = 5
-        else:
-            Nnearestneighbours = 6
-#         print('\n',str(Nnearestneighbours),':\n',p)
-        for j in range(Nnearestneighbours):
-            # Coordinates of each nearest neighbour
-            x1, y1, z1 = p.iloc[j].x, p.iloc[j].y, p.iloc[j].z
-            # Store the vectors
-            edgevecs.append([[x0, x1], [y0, y1], [z0, z1]])
-    ev = np.array(edgevecs)
-    x0 = ev[:, 0, 0]
-    x1 = ev[:, 0, 1]
-    y0 = ev[:, 1, 0]
-    y1 = ev[:, 1, 1]
-    z0 = ev[:, 2, 0]
-    z1 = ev[:, 2, 1]
-    evd = pd.DataFrame({'x0': x0, 'x1': x1,
-                        'y0': y0, 'y1': y1,
-                        'z0': z0, 'z1': z1})
-    evdnew = evd.copy()
-    # Remove duplicate edges
-    for i in range(len(evd)):
-        # search for when a matching vector exists, allowing for (x,y,z)0 / (x,y,z)1 swaps
-        if matchxyz(evdnew[['x1', 'y1', 'z1']].loc[i].values, evdnew[['x0', 'y0', 'z0']].loc[i].values,
-                    evdnew[['x0', 'y0', 'z0']].loc[i+1:].values, evdnew[['x1', 'y1', 'z1']].loc[i+1:].values):
-            evdnew.drop(i, inplace=True)
+    vertices = vertices.copy()
+    try:
+        # Remove the previous neighbours as they will be recalculated
+        vertices.drop(['neighbours'],axis=1,inplace=True)
+    except:
+        pass
 
-    return evdnew
+    kdt = KDTree(list(zip(vertices.x.values,
+                          vertices.y.values,
+                          vertices.z.values)))
+    # Get 7 nearest neighbours for every vertex (includes itself, i.e. dist 0)
+    dists, indices = kdt.query(list(zip(vertices.x.values,
+                                        vertices.y.values,
+                                        vertices.z.values)), k = 7)
+
+    # Add the neighbour vertices to the vertex dataframe
+    # 5 for the original icosahedron vertices
+    # 6 for the others
+    locs_origicos = vertices[vertices.iteration == 0].index.values
+    locs_others = vertices[vertices.iteration != 0].index.values
+    neighbs5 = pd.DataFrame({'neighbours':indices[:,1:6].tolist()}).loc[locs_origicos]
+    neighbs6 = pd.DataFrame({'neighbours':indices[:,1:7].tolist()}).loc[locs_others]
+    neighbs = pd.concat([neighbs5,neighbs6])
+    vertices = vertices.join(neighbs)
+
+#    # New dataframe with the previous iteration's vertices as centres of faces
+#    faces = vertices[vertices.iteration < vertices.iteration.max()]
+#    faces['corners'] = np.empty((faces.shape[0]),dtype=list)
+#    faces['corners'][:] = []
+    #faces['corners'] =
+    # Set up all the edge vectors from each vertex's neighbour sets
+    # E = 3V-6  number of edges, E, from number of vertices, V
+    edgevecs = np.zeros((3*vertices.shape[0]-6,3,2))
+    k = 0 # loop counter through edgevecs
+    for i in range(vertices.shape[0]):
+        # i runs from 0 to V
+        # Coordinates of point i:
+        x0,y0,z0 = vertices.loc[i].x, vertices.loc[i].y, vertices.loc[i].z
+
+        for j in vertices.loc[i].neighbours:
+            # Coordinates of each  neighbour:
+            x1,y1,z1 = vertices.loc[j].x, vertices.loc[j].y, vertices.loc[j].z
+
+#            # Add face corners if we are on a face centre
+#            if i in faces.index.values:
+#                faces['corners'].loc[i].append([x1,y1,z1])
+
+            # Check if p1->p0 already exists in a previous p0->p1
+            # https://stackoverflow.com/a/33218744
+            if not (edgevecs == np.array([[x1,x0],[y1,y0],[z1,z0]])).all((1,2)).any():
+                # Store the vectors
+                edgevecs[k] = np.array([[x0,x1],[y0,y1],[z0,z1]])
+                k+=1
+
+    x0 = edgevecs[:,0,0]
+    x1 = edgevecs[:,0,1]
+    y0 = edgevecs[:,1,0]
+    y1 = edgevecs[:,1,1]
+    z0 = edgevecs[:,2,0]
+    z1 = edgevecs[:,2,1]
+    edgevecs = pd.DataFrame({'x0':x0,'x1':x1,'y0':y0,'y1':y1,'z0':z0,'z1':z1})
+
+    return edgevecs, vertices
 
 
 def slerp(p0, p1):
@@ -129,7 +182,38 @@ class Polyhedron(object):
         self.vertices.z = verts[:, 2]
 
     def _get_edgevecs(self):
-        self.edgevecs = get_edgevecs(self.vertices)
+        self.edgevecs, self.vertices = get_edgevecs(self.vertices)
+
+    def get_dualfaces(self, dual=False):
+        """CURRENTLY BROKEN
+
+        Construct the hexagonal(+12pentagons) faces from the next subdivision
+        Get the sets of vertices that define the corners of the faces
+        The faces will be centred on the vertices of the current Polyhedron
+        """
+        newpoly = self.subdivide()
+        verts = newpoly.vertices
+        facecentres = verts[verts.iteration < verts.iteration.max()]
+        # faces = [[] for i in range(facecentres.shape[0])]
+        faces = []
+        for i in range(facecentres.shape[0]):
+            locs_neighbs = facecentres.iloc[i].neighbours
+            neighbs = verts.loc[locs_neighbs]
+            faces.append(neighbs[['x', 'y', 'z']].values)
+
+        # Reorder the vertices in each face so that they can go into a patch
+        # i.e. that they are ordered from one neighbour to the next
+        newfaces = []
+        for f in faces:
+            fnew = np.zeros_like(f)
+            fnew[0] = f[0]
+            ftemp = np.delete(f, 0, axis=0)
+            for i in range(len(ftemp)):
+                j = ((ftemp-fnew[i])**2).sum(axis=1).argmin()
+                fnew[i+1] = ftemp[j]
+                ftemp = np.delete(ftemp, j, axis=0)
+            newfaces.append(fnew)
+        return newfaces
 
     def subdivide(self):
         """Take the edge vectors and subdivide them
@@ -145,10 +229,9 @@ class Polyhedron(object):
         p1arr = np.vstack([x1, y1, z1]).T
         newvertices = []
         for p0, p1 in zip(p0arr, p1arr):
-        #     print(slerp(p0,p1))
             newvertices.append(slerp(p0, p1))
         newvertices = vertices2dataframe(np.array(newvertices))
-        newvertices['origicos'] = False
+        # newvertices['origicos'] = False
         newvertices = pd.concat((newvertices, self.vertices), ignore_index=True)
 
         newpoly = Polyhedron()
@@ -168,6 +251,20 @@ class Polyhedron(object):
         vecsz = np.array([i for i in zip(z0, z1)])
         for v in zip(vecsx, vecsy, vecsz):
             ax.plot(v[0], v[1], v[2], color, linewidth=linewidth)
+
+    def drawverts(self, ax, style):
+        """Draw the vertices as points on a given 3d axis with a given style
+        """
+        x = self.vertices.x.values
+        y = self.vertices.y.values
+        z = self.vertices.z.values
+        ax.plot(x,y,z,style)
+
+    def get_verts_thetaphi(self):
+        _, theta, phi = cart2sph(self.vertices.x.values,
+                                 self.vertices.y.values,
+                                 self.vertices.z.values)
+        return theta, phi
 
 
 class RegIcos(Polyhedron):
@@ -194,5 +291,5 @@ class RegIcos(Polyhedron):
                 [ -r, 0.0,  1.0],
                 ], dtype=float)
         super()._set_vertices(vertices)
-        self.vertices['origicos'] = True
+        self.vertices['iteration'] = 0
         super()._get_edgevecs()
