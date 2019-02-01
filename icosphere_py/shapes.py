@@ -1,6 +1,24 @@
 """
 
 Author: Ashley Smith
+
+Creates an icosphere by repeated subdivision of an icosahedron.
+I have naively built it from:
+    1 - defining vertex locations
+    2 - finding their neighbouring vertices from a nearest-neighbour search
+    3 - interpolating half way between vertices and their neighbours to identify the new vertices
+    4 - repeating
+It would be more efficient to define the faces (triangles), and subdivide them
+
+Alternatives?
+https://en.wikipedia.org/wiki/Goldberg%E2%80%93Coxeter_construction
+https://en.wikipedia.org/wiki/List_of_geodesic_polyhedra_and_Goldberg_polyhedra
+http://donhavey.com/blog/tutorials/tutorial-3-the-icosahedron-sphere/
+
+https://github.com/brsr/antitile
+http://docs.sympy.org/latest/modules/combinatorics/polyhedron.html
+https://www.mathworks.com/matlabcentral/fileexchange/50105-icosphere
+
 """
 
 
@@ -19,11 +37,10 @@ def get_nearest_neighbours(p, N, i):
     Returns:
         a tuple of locs of the nearest neighbours
     """
-    # p_new is new dataframe with point i removed
-    #p_new = p.drop(i)
-    p_new = p
+    # p_new will be the returned dataframe
+    p_new = p.copy()
     # calculate distances to other points
-    vecs = p_new - p.loc[i]
+    vecs = p_new[["x", "y", "z"]] - p[["x", "y", "z"]].loc[i]
     dists = vecs.x**2 + vecs.y**2 + vecs.z**2
     # merge distances into the p_new
     dists = dists.to_frame(name='dist2')
@@ -82,7 +99,7 @@ def get_edgevecs(vertices):
     return evdnew
 
 
-def slerp(p0,p1):
+def slerp(p0, p1):
     """Spherical linear interpolation to halfway between between p0 and p1
     https://en.wikipedia.org/wiki/Slerp
     """

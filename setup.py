@@ -17,5 +17,5 @@ setup(
     author='Ashley Smith',
     author_email='ashley.smith@ed.ac.uk',
     license='MIT',
-    install_requires=['']
+    install_requires=['pandas']
 )
