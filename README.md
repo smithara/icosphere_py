@@ -35,5 +35,4 @@ k: V <br>
 5: 10242 <br>
 6: 40962 <br>
 
-![Base icosahedron and three subdivisions]
-(https://github.com/smithara/icosphere_py/icospheres.png)
+![Base icosahedron and three subdivisions](https://github.com/smithara/icosphere_py/icospheres.png)
