@@ -14,6 +14,7 @@ Alternatives?
 https://en.wikipedia.org/wiki/Goldberg%E2%80%93Coxeter_construction
 https://en.wikipedia.org/wiki/List_of_geodesic_polyhedra_and_Goldberg_polyhedra
 http://donhavey.com/blog/tutorials/tutorial-3-the-icosahedron-sphere/
+https://github.com/mbrubake/cryoem-cvpr2015/blob/master/quadrature/icosphere.py
 
 https://github.com/brsr/antitile
 http://docs.sympy.org/latest/modules/combinatorics/polyhedron.html
