@@ -1,5 +1,7 @@
 # icosphere_py
 
+![Base icosahedron and three subdivisions](https://raw.githubusercontent.com/smithara/icosphere_py/master/icospheres.png)
+
 Generating a spherical grid (currently only the vertices, which linked would form triangular faces, i.e. spherical triangular tessellation) based on repeated subdivision of a regular icosahedron. It's done in an inefficient way so it's slow (about 10 minutes to do 6 subdivisions).
 
 Pip installation:
@@ -35,4 +37,4 @@ k: V <br>
 5: 10242 <br>
 6: 40962 <br>
 
-![Base icosahedron and three subdivisions](https://github.com/smithara/icosphere_py/icospheres.png)
+
