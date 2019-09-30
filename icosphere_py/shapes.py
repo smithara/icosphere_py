@@ -25,6 +25,7 @@ https://www.mathworks.com/matlabcentral/fileexchange/50105-icosphere
 
 import numpy as np
 import pandas as pd
+from mpl_toolkits import mplot3d
 from scipy.spatial import cKDTree as KDTree
 
 
@@ -45,6 +46,8 @@ def sph2cart(R, t, p):
 
 
 def cart2sph(X, Y, Z):
+    """Returns r, t, p with t,p in degrees
+    """
     rad = np.pi/180
     theta = 90 - np.arctan2(Z, np.sqrt(X**2 + Y**2))/rad
     phi = np.mod(np.arctan2(Y, X)/rad, 360)
@@ -84,14 +87,14 @@ def matchxyz(xyz0, xyz1, xyz0arr, xyz1arr):
     return False
 
 
-def get_edgevecs(vertices):
+def get_edgevecs(vertices, fudge=False):
     """Given a set of vertices, find the neighbouring 5 or 6 vertices to each,
     return the set of vectors between vertices (which define the edges)
     """
     vertices = vertices.copy()
     try:
         # Remove the previous neighbours as they will be recalculated
-        vertices.drop(['neighbours'],axis=1,inplace=True)
+        vertices = vertices.drop(['neighbours'], axis=1)
     except:
         pass
 
@@ -120,7 +123,10 @@ def get_edgevecs(vertices):
     #faces['corners'] =
     # Set up all the edge vectors from each vertex's neighbour sets
     # E = 3V-6  number of edges, E, from number of vertices, V
-    edgevecs = np.zeros((3*vertices.shape[0]-6,3,2))
+    if not fudge:
+        edgevecs = np.zeros((3*vertices.shape[0]-6, 3, 2))
+    else:
+        edgevecs = np.zeros((9*vertices.shape[0], 3, 2))
     k = 0 # loop counter through edgevecs
     for i in range(vertices.shape[0]):
         # i runs from 0 to V
@@ -149,6 +155,8 @@ def get_edgevecs(vertices):
     z0 = edgevecs[:,2,0]
     z1 = edgevecs[:,2,1]
     edgevecs = pd.DataFrame({'x0':x0,'x1':x1,'y0':y0,'y1':y1,'z0':z0,'z1':z1})
+    if fudge:
+        edgevecs = edgevecs.dropna().reset_index().drop(columns="index")
 
     return edgevecs, vertices
 
@@ -182,8 +190,51 @@ class Polyhedron(object):
         self.vertices.y = verts[:, 1]
         self.vertices.z = verts[:, 2]
 
-    def _get_edgevecs(self):
-        self.edgevecs, self.vertices = get_edgevecs(self.vertices)
+    def _get_edgevecs(self, fudge=False):
+        self.edgevecs, self.vertices = get_edgevecs(self.vertices, fudge=fudge)
+
+    def rotate(self, delta_phi):
+        """Rotate by delta_phi degrees.
+        """
+        r, t, p = cart2sph(*[self.vertices[i] for i in "xyz"])
+        p = (p + delta_phi) % 360
+        x, y, z = sph2cart(r, t, p)
+        for i, var in zip("xyz", (x, y, z)):
+            self.vertices[i] = var
+        self._get_edgevecs()
+        return self
+
+    def get_faces(self):
+        """Construct the triagonal faces.
+
+        There are duplicate faces in what gets returned
+        """
+        faces = []
+        # (p, q, r) are indexes within self.vertices
+        for p in self.vertices.index:
+            # define all the faces neighbouring point p
+            # Loop through the points, q, neighbouring p, and identify
+            #   those neighbours, r, of q, which themselves also neighbour p
+            for q in self.vertices.loc[p].neighbours:
+                # build "face", an array containing points (p, q, r)
+                # to define p->q, q->r, r->p
+                # [[px, py, pz]
+                #  [qx, qy, qz]
+                #  [rx, ry, rz]]
+                face = np.empty((3, 3))
+                face[:] = np.nan
+                if q not in self.vertices.index:
+                    continue
+                face[0] = self.vertices.loc[p][["x", "y", "z"]].values
+                face[1] = self.vertices.loc[q][["x", "y", "z"]].values
+                for r in self.vertices.loc[q].neighbours:
+                    if r not in self.vertices.index:
+                        continue
+                    if r in self.vertices.loc[p].neighbours:
+                        face[2] = self.vertices.loc[r][["x", "y", "z"]].values
+                        # break
+                faces.append(face)
+        return faces
 
     def get_dualfaces(self, dual=False):
         """CURRENTLY BROKEN
@@ -191,6 +242,13 @@ class Polyhedron(object):
         Construct the hexagonal(+12pentagons) faces from the next subdivision
         Get the sets of vertices that define the corners of the faces
         The faces will be centred on the vertices of the current Polyhedron
+        """
+        pass
+
+    def _construct_centroid_polygons(self):
+        """Constructs pentagons/hexagons around the grid vertices.
+
+        It was meant to be get_dualfaces() but doesn't actually do that...
         """
         newpoly = self.subdivide()
         verts = newpoly.vertices
@@ -232,6 +290,9 @@ class Polyhedron(object):
         for p0, p1 in zip(p0arr, p1arr):
             newvertices.append(slerp(p0, p1))
         newvertices = vertices2dataframe(np.array(newvertices))
+        # Set the iteration number on the set of new vertices
+        last_iteration = self.vertices["iteration"].max()
+        newvertices["iteration"] = last_iteration + 1
         # newvertices['origicos'] = False
         newvertices = pd.concat((newvertices, self.vertices), ignore_index=True)
 
@@ -241,8 +302,8 @@ class Polyhedron(object):
         newpoly._get_edgevecs()
         return newpoly
 
-    def drawedges(self, ax, color, linewidth):
-        """Draw its edges on a given 3d axis in a given color
+    def drawedges(self, ax, **kwargs):
+        """Draw its edges on a given 3d axis in a given color.
         """
         x0, x1 = self.edgevecs.x0.values, self.edgevecs.x1.values
         y0, y1 = self.edgevecs.y0.values, self.edgevecs.y1.values
@@ -251,15 +312,33 @@ class Polyhedron(object):
         vecsy = np.array([i for i in zip(y0, y1)])
         vecsz = np.array([i for i in zip(z0, z1)])
         for v in zip(vecsx, vecsy, vecsz):
-            ax.plot(v[0], v[1], v[2], color, linewidth=linewidth)
+            ax.plot(v[0], v[1], v[2], **kwargs)
 
-    def drawverts(self, ax, style):
-        """Draw the vertices as points on a given 3d axis with a given style
+    def drawverts(self, ax, **kwargs):
+        """Draw the vertices as points on a given 3d axis with a given style.
         """
         x = self.vertices.x.values
         y = self.vertices.y.values
         z = self.vertices.z.values
-        ax.plot(x,y,z,style)
+        ax.scatter(x, y, z, depthshade=True, **kwargs)
+
+    def drawfaces(
+            self, ax,
+            color="r", edgecolor="k", linewidth=0.1, alpha=None,
+            **kwargs
+            ):
+        """Draw the triangular faces.
+        """
+        for face_coords in self.get_faces():
+            face = mplot3d.art3d.Poly3DCollection([face_coords])
+            # Bug with setting alpha:
+            # https://github.com/matplotlib/matplotlib/issues/10237
+            # Must apply alpha first:
+            face.set_alpha(alpha)
+            face.set_color(color)
+            face.set_edgecolor(edgecolor)
+            face.set_linewidth(linewidth)
+            ax.add_collection3d(face)
 
     def get_verts_thetaphi(self):
         _, theta, phi = cart2sph(self.vertices.x.values,
